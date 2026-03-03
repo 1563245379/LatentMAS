@@ -18,6 +18,7 @@ from data import (
 )
 from methods.baseline import BaselineMethod
 from methods.latent_mas import LatentMASMethod
+from methods.latent_mas_hybrid import LatentMASHybridMethod
 from methods.text_mas import TextMASMethod
 from models import ModelWrapper
 from utils import auto_device, set_seed
@@ -78,7 +79,7 @@ def process_batch(
     if remaining <= 0:
         return processed, preds
     current_batch = batch[:remaining]
-    if args.method == "latent_mas" and args.use_vllm: 
+    if args.method in ["latent_mas", "latent_mas_hybrid"] and args.use_vllm: 
         results = method.run_batch_vllm(current_batch) 
     else:
         results = method.run_batch(current_batch)
@@ -122,7 +123,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     # core args for experiments
-    parser.add_argument("--method", choices=["baseline", "text_mas", "latent_mas"], required=True)
+    parser.add_argument("--method", choices=["baseline", "text_mas", "latent_mas", "latent_mas_hybrid"], required=True)
     parser.add_argument("--model_name", type=str, required=True, #choices=["Qwen/Qwen3-4B", "Qwen/Qwen3-4B", "Qwen/Qwen3-14B"]
     )
     parser.add_argument("--max_samples", type=int, default=-1)
@@ -153,6 +154,7 @@ def main():
     parser.add_argument("--enable_prefix_caching", action="store_true", help="Enable prefix caching in vLLM for latent_mas")
     parser.add_argument("--use_second_HF_model", action="store_true", help="Use a second HF model for latent generation in latent_mas")
     parser.add_argument("--device2", type=str, default="cuda:1")
+    parser.add_argument("--agent_models", type=str, nargs="+", default=None, help="Specify model name per agent for latent_mas_hybrid (e.g. --agent_models ModelA ModelB ModelC ModelD)")
     parser.add_argument("--tensor_parallel_size", type=int, default=1, help="How many GPUs vLLM should shard the model across")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9, help="Target GPU memory utilization for vLLM")
 
@@ -187,7 +189,7 @@ def main():
             args.custom_prompts = raw_text
             args.custom_prompt_text = raw_text
 
-    if args.method == "latent_mas" and args.use_vllm:
+    if args.method in ["latent_mas", "latent_mas_hybrid"] and args.use_vllm:
         args.use_second_HF_model = True 
         args.enable_prefix_caching = True
 
@@ -228,6 +230,16 @@ def main():
             judger_max_new_tokens=args.max_new_tokens,
             **common_kwargs,
             generate_bs=args.generate_bs, 
+            args=args,
+        )
+    elif args.method == 'latent_mas_hybrid':
+        method = LatentMASHybridMethod(
+            model,
+            agent_models=args.agent_models,
+            latent_steps=args.latent_steps,
+            judger_max_new_tokens=args.max_new_tokens,
+            **common_kwargs,
+            generate_bs=args.generate_bs,
             args=args,
         )
 

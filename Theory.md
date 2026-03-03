@@ -1,6 +1,3 @@
-
-
-
 **完全可以扩展**。
 
 这篇文章中提出的“潜在状态对齐（Input-Output Distribution Alignment）”机制及其理论证明，在数学上并不局限于输入维度 $d_{in}$ 和输出维度 $d_{out}$ 相同的情况。即使输入嵌入 $e$ 和输出嵌入 $h$ 的维度不同（例如，异构多智能体协作或不同参数规模的模型之间进行隐空间通信），该对齐方法和 Wasserstein 距离的上限证明依然严格成立。
@@ -193,6 +190,7 @@ $$ q(\cdot) = \frac{1}{n} \sum_{i=1}^n p^i(\cdot | \mathcal{I}^i) \cdot M^i $$
 * **第二篇论文**使用离散空间的 0-1 映射矩阵 $M^i$ 来对齐维度不同的**输出概率（Probability Vectors）**。
 
 这说明，无论是隐空间还是输出空间，**“寻找公共空间（Common Space）并发起线性投影”** 是目前实现跨模型、跨架构异构大模型免训练协作（Training-free Collaboration）的最核心且通用的解法。
+
 
 
 

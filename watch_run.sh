@@ -9,6 +9,7 @@ RUN_CMD="python run.py \
   --prompt sequential \
   --max_samples -1 \
   --generate_bs 8 \
+  --latent_steps 10 \
   --resume"
 
 LOG_FILE="output.log"

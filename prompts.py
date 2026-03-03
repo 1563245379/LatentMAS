@@ -31,7 +31,7 @@ def _render_custom_prompt(role: str, question: str, context: str, args):
 
 def build_agent_message_sequential_latent_mas(role: str, question: str, context: str = "", method=None, args=None):
 
-    assert method in ["latent_mas"], "this prompt only for latent_mas method"
+    assert method in ["latent_mas", "latent_mas_hybrid"], "this prompt only for latent_mas method"
 
     custom_system, user_prompt = _render_custom_prompt(role, question, context, args)
     system_message = _resolve_system_message(args, custom_system)
@@ -156,7 +156,7 @@ You are a helpful assistant. Reason step-by-step and provide a clear, concise re
 
 def build_agent_message_hierarchical_latent_mas(role: str, question: str, context: str = "", method=None, args=None):
 
-    assert method in ["latent_mas"], "this prompt only for latent_mas method"
+    assert method in ["latent_mas", "latent_mas_hybrid"], "this prompt only for latent_mas method"
 
     custom_system, user_content = _render_custom_prompt(role, question, context, args)
     system_message = _resolve_system_message(args, custom_system)
