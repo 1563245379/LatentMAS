@@ -12,7 +12,6 @@ RUN_CMD="python run.py \
   --latent_steps 40 \
   --think \
   --latent_space_realign \
-  --use_vllm \
   --resume"
 
 LOG_FILE="output.log"
