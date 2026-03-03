@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from typing import Dict, List, Tuple
 
 from tqdm import tqdm
@@ -30,6 +31,39 @@ def evaluate(preds: List[Dict]) -> Tuple[float, int]:
     return acc, correct
 
 
+def load_checkpoint(output_file: str) -> List[Dict]:
+    if not output_file or not os.path.exists(output_file):
+        return []
+    preds = []
+    with open(output_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    preds.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    return preds
+
+
+def append_to_jsonl(output_file: str, results: List[Dict]) -> None:
+    if not output_file:
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+    with open(output_file, "a", encoding="utf-8") as f:
+        for res in results:
+            res.pop("agents", None)
+            f.write(json.dumps(res, ensure_ascii=False) + "\n")
+
+
+def auto_output_file(args: argparse.Namespace) -> str:
+    model_short = args.model_name.split("/")[-1].lower()
+    return os.path.join(
+        "results",
+        f"{model_short}_{args.task}_{args.method}_{args.prompt}_seed{args.seed}.jsonl",
+    )
+
+
 def process_batch(
     method,
     batch: List[Dict],
@@ -38,6 +72,7 @@ def process_batch(
     progress,
     max_samples: int,
     args: argparse.Namespace,
+    output_file: str = "",
 ) -> Tuple[int, List[Dict]]:
     remaining = max_samples - processed
     if remaining <= 0:
@@ -75,6 +110,8 @@ def process_batch(
             print("----------------------------------------------")
         print(f"Result: Pred={res.get('prediction')} | Gold={res.get('gold')} | OK={res.get('correct')}")
 
+    append_to_jsonl(output_file, results)
+
     processed += len(results)
     if progress is not None:
         progress.update(len(results))
@@ -88,7 +125,7 @@ def main():
     parser.add_argument("--method", choices=["baseline", "text_mas", "latent_mas"], required=True)
     parser.add_argument("--model_name", type=str, required=True, #choices=["Qwen/Qwen3-4B", "Qwen/Qwen3-4B", "Qwen/Qwen3-14B"]
     )
-    parser.add_argument("--max_samples", type=int, default=100)
+    parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--task", choices=["gsm8k", "aime2024", "aime2025", "gpqa", "arc_easy", "arc_challenge", "mbppplus", 'humanevalplus', 'medqa', "custom"], default="gsm8k")
     parser.add_argument("--prompt", type=str, choices=["sequential", "hierarchical"], default="sequential")
     parser.add_argument("--custom_prompt_file", type=str, default=None, help="Path to custom prompt template(s). Supports baseline, text_mas, and latent_mas. Accepts plain text (baseline) or JSON with role-specific fields.")
@@ -118,6 +155,9 @@ def main():
     parser.add_argument("--device2", type=str, default="cuda:1")
     parser.add_argument("--tensor_parallel_size", type=int, default=1, help="How many GPUs vLLM should shard the model across")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9, help="Target GPU memory utilization for vLLM")
+
+    parser.add_argument("--output_file", type=str, default="", help="Path to the output JSONL file.")
+    parser.add_argument("--resume", action="store_true", help="Whether to resume from existing results in the output JSONL file")
 
     args = parser.parse_args()
     
@@ -150,7 +190,10 @@ def main():
     if args.method == "latent_mas" and args.use_vllm:
         args.use_second_HF_model = True 
         args.enable_prefix_caching = True
-    
+
+    if not args.output_file:
+        args.output_file = auto_output_file(args)
+
     set_seed(args.seed)
     device = auto_device(args.device)
     model = ModelWrapper(args.model_name, device, use_vllm=args.use_vllm, args=args)
@@ -189,7 +232,13 @@ def main():
         )
 
     preds: List[Dict] = []
-    processed = 0
+    resumed = 0
+    if args.resume:
+        preds = load_checkpoint(args.output_file)
+        resumed = len(preds)
+        if resumed > 0:
+            print(f"[Resume] Resuming from {args.output_file}, already processed {resumed} samples.")
+    processed = resumed
     batch: List[Dict] = []
 
     if args.task == "gsm8k":
@@ -235,57 +284,72 @@ def main():
         dataset_iter = list(dataset_iter)  
         args.max_samples = len(dataset_iter)
 
-    progress = tqdm(total=args.max_samples)
+    if resumed > 0 and resumed >= args.max_samples:
+        print(f"[Done] Already processed {resumed} samples, which meets or exceeds max_samples={args.max_samples}. No more processing needed.")
+        progress = tqdm(total=args.max_samples, initial=args.max_samples)
+        progress.close()
+    else:
+        dataset_iter = list(dataset_iter)[resumed:]
 
-    for item in dataset_iter:
-        if processed >= args.max_samples:
-            break
-        batch.append(item)
-        if len(batch) == args.generate_bs or processed + len(batch) == args.max_samples:
+        progress = tqdm(total=args.max_samples, initial=resumed)
+
+        for item in dataset_iter:
+            if processed >= args.max_samples:
+                break
+            batch.append(item)
+            if len(batch) == args.generate_bs or processed + len(batch) == args.max_samples:
+                processed, preds = process_batch(
+                    method,
+                    batch,
+                    processed,
+                    preds,
+                    progress,
+                    args.max_samples,
+                    args,
+                    output_file=args.output_file,
+                )
+                batch = []
+                if processed >= args.max_samples:
+                    break
+
+        if batch and processed < args.max_samples:
             processed, preds = process_batch(
                 method,
                 batch,
                 processed,
                 preds,
                 progress,
-                args.max_samples,
-                args,
+                max_samples=args.max_samples,
+                args=args,
+                output_file=args.output_file,
             )
-            batch = []
-            if processed >= args.max_samples:
-                break
 
-    if batch and processed < args.max_samples:
-        processed, preds = process_batch(
-            method,
-            batch,
-            processed,
-            preds,
-            progress,
-            max_samples=args.max_samples,
-            args=args,
-        )
-    progress.close()
+        progress.close()
     
     total_time = time.time() - start_time
 
     acc, correct = evaluate(preds)
-    print(
-        json.dumps(
-            {
-                "method": args.method,
-                "model": args.model_name,
-                "split": args.split,
-                "seed": args.seed,
-                "max_samples": args.max_samples,
-                "accuracy": acc,
-                "correct": correct,
-                "total_time_sec": round(total_time,4),
-                "time_per_sample_sec": round(total_time / args.max_samples, 4),
-            },
-            ensure_ascii=False,
-        )
-    )
+
+    summary = {
+        "method": args.method,
+        "model": args.model_name,
+        "split": args.split,
+        "seed": args.seed,
+        "max_samples": args.max_samples,
+        "accuracy": acc,
+        "correct": correct,
+        "total_time_sec": round(total_time, 4),
+        "time_per_sample_sec": round(total_time / args.max_samples, 4),
+        "output_file": args.output_file,
+    }
+
+    summary_file = os.path.splitext(args.output_file)[0] + "_summary.json"
+    os.makedirs(os.path.dirname(os.path.abspath(summary_file)), exist_ok=True)
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"[Done] Evaluation completed in {round(total_time, 2)} seconds. Summary saved to {summary_file}.")
+
+    print(json.dumps(summary, ensure_ascii=False))
 
 
 
