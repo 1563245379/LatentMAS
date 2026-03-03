@@ -4,14 +4,13 @@ export HF_HOME=/workspace/cache
 
 RUN_CMD="python run.py \
   --method latent_mas \
-  --model_name Qwen/Qwen3-4B \
+  --model_name Qwen/Qwen3-8B \
   --task mbppplus \
   --prompt sequential \
   --max_samples -1 \
   --generate_bs 8 \
-  --latent_steps 40 \
+  --latent_steps 10 \
   --think \
-  --latent_space_realign \
   --use_vllm \
   --resume"
 
