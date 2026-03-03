@@ -136,7 +136,7 @@ def main():
     # other args
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--split", type=str, default="test")
-    parser.add_argument("--max_new_tokens", type=int, default=10000)
+    parser.add_argument("--max_new_tokens", type=int, default=4096)
     parser.add_argument("--latent_steps", type=int, default=10)
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top_p", type=float, default=0.95)

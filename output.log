@@ -1,16 +1,116 @@
 
-========== [watch_run] attempt=1 2026-03-03 00:13:45 ==========
+========== [watch_run] attempt=1 2026-03-03 00:32:58 ==========
 `torch_dtype` is deprecated! Use `dtype` instead!
-Fetching 3 files:   0%|                                                                                                                   | 0/3 [00:00<?, ?it/s]Fetching 3 files:  33%|███████████████████████████████████▋                                                                       | 1/3 [00:10<00:20, 10.42s/it]Fetching 3 files:  67%|███████████████████████████████████████████████████████████████████████▎                                   | 2/3 [00:10<00:04,  4.53s/it]Fetching 3 files: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████| 3/3 [00:10<00:00,  3.61s/it]
-Loading checkpoint shards:   0%|                                                                                                          | 0/3 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 27.02it/s]Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 26.59it/s]
-Generating train split:   0%|                                                                                                   | 0/7473 [00:00<?, ? examples/s]Generating train split: 100%|████████████████████████████████████████████████████████████████████████████████████| 7473/7473 [00:00<00:00, 129689.08 examples/s]
-Generating test split:   0%|                                                                                                    | 0/1319 [00:00<?, ? examples/s]Generating test split: 100%|██████████████████████████████████████████████████████████████████████████████████████| 1319/1319 [00:00<00:00, 38835.33 examples/s]
-  0%|                                                                                                                                  | 0/1319 [00:00<?, ?it/s]
-Agents:   0%|                                                                                                                          | 0/4 [00:00<?, ?agent/s][A
-Agent: Planner (planner):   0%|                                                                                                        | 0/4 [00:00<?, ?agent/s][A
-Agent: Planner (planner):  25%|████████████████████████                                                                        | 1/4 [00:02<00:06,  2.18s/agent][A
-Agent: Critic (critic):  25%|████████████████████████▌                                                                         | 1/4 [00:02<00:06,  2.18s/agent][A
-Agent: Critic (critic):  50%|█████████████████████████████████████████████████                                                 | 2/4 [00:03<00:03,  1.61s/agent][A
-Agent: Refiner (refiner):  50%|████████████████████████████████████████████████                                                | 2/4 [00:03<00:03,  1.61s/agent][A
-Agent: Refiner (refiner):  75%|████████████████████████████████████████████████████████████████████████                        | 3/4 [00:04<00:01,  1.44s/agent][A
-Agent: Judger (judger):  75%|█████████████████████████████████████████████████████████████████████████▌                        | 3/4 [00:04<00:01,  1.44s/agent][AA decoder-only architecture is being used, but right-padding was detected! For correct generation results, please set `padding_side='left'` when initializing the tokenizer.
+
+Loading checkpoint shards:   0%|                                                                                                          | 0/3 [00:00<?, ?it/s]
+Loading checkpoint shards:  33%|████████████████████████████████▋                                                                 | 1/3 [00:00<00:00,  2.03it/s]
+Loading checkpoint shards:  67%|█████████████████████████████████████████████████████████████████▎                                | 2/3 [00:01<00:00,  1.43it/s]
+Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 3/3 [00:01<00:00,  2.21it/s]
+
+  0%|                                                                                                                                  | 0/1319 [00:00<?, ?it/s]
+
+Agents:   0%|                                                                                                                          | 0/4 [00:00<?, ?agent/s][A
+
+Agent: Planner (planner):   0%|                                                                                                        | 0/4 [00:00<?, ?agent/s][A
+
+Agent: Planner (planner):  25%|████████████████████████                                                                        | 1/4 [00:00<00:02,  1.33agent/s][A
+
+Agent: Critic (critic):  25%|████████████████████████▌                                                                         | 1/4 [00:00<00:02,  1.33agent/s][A
+
+Agent: Critic (critic):  50%|█████████████████████████████████████████████████                                                 | 2/4 [00:01<00:01,  1.96agent/s][A
+
+Agent: Refiner (refiner):  50%|████████████████████████████████████████████████                                                | 2/4 [00:01<00:01,  1.96agent/s][A
+
+Agent: Refiner (refiner):  75%|████████████████████████████████████████████████████████████████████████                        | 3/4 [00:01<00:00,  2.31agent/s][A
+
+Agent: Judger (judger):  75%|█████████████████████████████████████████████████████████████████████████▌                        | 3/4 [00:01<00:00,  2.31agent/s][AA decoder-only architecture is being used, but right-padding was detected! For correct generation results, please set `padding_side='left'` when initializing the tokenizer.
+
+Agent: Judger (judger):  75%|████████████████████████████████████████████████████████████████████████▊                        | 3/4 [12:41<04:13, 253.90s/agent]
+Traceback (most recent call last):
+  File "/workspace/LatentMAS/run.py", line 357, in <module>
+    main()
+  File "/workspace/LatentMAS/run.py", line 301, in main
+    processed, preds = process_batch(
+                       ^^^^^^^^^^^^^^
+  File "/workspace/LatentMAS/run.py", line 84, in process_batch
+    results = method.run_batch(current_batch)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/LatentMAS/methods/latent_mas.py", line 243, in run_batch
+    generated_batch, _ = self.model.generate_text_batch(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/LatentMAS/models.py", line 247, in generate_text_batch
+    outputs = self.model.generate(
+              ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/generation/utils.py", line 2566, in generate
+    result = decoding_method(
+             ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/generation/utils.py", line 2789, in _sample
+    outputs = model_forward(**model_inputs, return_dict=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/utils/generic.py", line 918, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/models/qwen3/modeling_qwen3.py", line 480, in forward
+    outputs: BaseModelOutputWithPast = self.model(
+                                       ^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/utils/generic.py", line 1072, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/models/qwen3/modeling_qwen3.py", line 410, in forward
+    hidden_states = decoder_layer(
+                    ^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/modeling_layers.py", line 94, in __call__
+    return super().__call__(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/utils/deprecation.py", line 172, in wrapped_func
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/models/qwen3/modeling_qwen3.py", line 260, in forward
+    hidden_states, _ = self.self_attn(
+                       ^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/utils/deprecation.py", line 172, in wrapped_func
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/models/qwen3/modeling_qwen3.py", line 216, in forward
+    attn_output, attn_weights = attention_interface(
+                                ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/integrations/sdpa_attention.py", line 68, in sdpa_attention_forward
+    value = repeat_kv(value, module.num_key_value_groups)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/transformers/integrations/sdpa_attention.py", line 27, in repeat_kv
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 588.00 MiB. GPU 0 has a total capacity of 23.54 GiB of which 241.75 MiB is free. Process 2734425 has 23.30 GiB memory in use. Of the allocated memory 18.48 GiB is allocated by PyTorch, and 4.33 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
