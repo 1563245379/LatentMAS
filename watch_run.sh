@@ -4,12 +4,12 @@ export HF_HOME=/workspace/cache
 
 RUN_CMD="python run.py \
   --method latent_mas \
-  --model_name Qwen/Qwen3-4B \
-  --task gsm8k \
+  --model_name Qwen/Qwen3-8B \
+  --task aime2025 \
   --prompt sequential \
   --max_samples -1 \
   --generate_bs 8 \
-  --latent_steps 10 \
+  --latent_steps 20 \
   --resume"
 
 LOG_FILE="output.log"
