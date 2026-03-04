@@ -406,75 +406,74 @@ class LatentMASMethod:
                     )
             else:
                 # Last agent: Generate final text output
-                # A stack of [B, L_i, H]
-                past_embedding = torch.cat(embedding_record, dim=1).to(self.vllm_device)
-
                 if self.args.think:
                     final_agent_prompts = [f"{prompt}{self.args.think}" for prompt in prompts]
                 else:
                     final_agent_prompts = prompts
 
-                final_agent_encoded = self.model.tokenizer(
-                    final_agent_prompts,
-                    return_tensors="pt",
-                    padding=True,
-                    add_special_tokens=False,
-                )
-                final_agent_encoded_ids = final_agent_encoded["input_ids"].to(self.model.HF_device)
-                # Get current prompt embedding
-                curr_prompt_emb = self.model.embedding_layer(final_agent_encoded_ids).squeeze(0).to(self.vllm_device)
+                if self.latent_steps > 0 and embedding_record:
+                    # Use embedding-based vLLM generation with latent context
+                    # A stack of [B, L_i, H]
+                    past_embedding = torch.cat(embedding_record, dim=1).to(self.vllm_device)
 
-                # assert Qwen model
-                #assert "Qwen" in self.args.model_name or "qwen" in self.args.model_name, "latent_embedding_position is only supported for Qwen models currently."
+                    final_agent_encoded = self.model.tokenizer(
+                        final_agent_prompts,
+                        return_tensors="pt",
+                        padding=True,
+                        add_special_tokens=False,
+                    )
+                    final_agent_encoded_ids = final_agent_encoded["input_ids"].to(self.model.HF_device)
+                    # Get current prompt embedding (keep batch dim)
+                    curr_prompt_emb = self.model.embedding_layer(final_agent_encoded_ids).to(self.vllm_device)
 
-                # handle latent embedding insertion position
-                len_of_left = []
-                for p in final_agent_prompts:
-                    idx = p.find("<|im_start|>user\n")
-                    # Get the text up to and including "<|im_start|>user\n"
-                    left = p[: idx + len("<|im_start|>user\n")]
-                    len_of_left.append(len(self.model.tokenizer(left)['input_ids']))
+                    # handle latent embedding insertion position
+                    len_of_left = []
+                    for p in final_agent_prompts:
+                        idx = p.find("<|im_start|>user\n")
+                        # Get the text up to and including "<|im_start|>user\n"
+                        left = p[: idx + len("<|im_start|>user\n")]
+                        len_of_left.append(len(self.model.tokenizer(left)['input_ids']))
+                        
+                    B, L, H = curr_prompt_emb.shape
+                    _, Lp, _ = past_embedding.shape  # assume shape consistency
+                        
+                    whole_prompt_emb_list = []
+                    for i in range(B):
+                        insert_idx = len_of_left[i]
+                        left_emb = curr_prompt_emb[i, :insert_idx, :]
+                        right_emb = curr_prompt_emb[i, insert_idx:, :]
+                        combined = torch.cat([left_emb, past_embedding[i], right_emb], dim=0)
+                        whole_prompt_emb_list.append(combined)
+
+                    # Pad back to max length if needed
+                    max_len = max(x.shape[0] for x in whole_prompt_emb_list)
+                    whole_prompt_emb = torch.stack([
+                        torch.cat([x, torch.zeros(max_len - x.shape[0], H, device=x.device)], dim=0)
+                        for x in whole_prompt_emb_list
+                    ])
+
+                    # Use vLLM with prompt embeddings
+                    prompt_embeds_list = [
+                        {
+                            "prompt_embeds": embeds
+                        } for embeds in whole_prompt_emb 
+                    ]
                     
-                B, L, H = curr_prompt_emb.shape
-                _, Lp, H = past_embedding.shape  # assume shape consistency
-                    
-                whole_prompt_emb_list = []
-                for i in range(B):
-                    insert_idx = len_of_left[i]
-                    left_emb = curr_prompt_emb[i, :insert_idx, :]
-                    right_emb = curr_prompt_emb[i, insert_idx:, :]
-                    combined = torch.cat([left_emb, past_embedding[i], right_emb], dim=0)
-                    whole_prompt_emb_list.append(combined)
+                    outputs = self.model.vllm_engine.generate(
+                        prompt_embeds_list,
+                        self.sampling_params,
+                    )
 
-                # Pad back to max length if needed
-                max_len = max(x.shape[0] for x in whole_prompt_emb_list)
-                whole_prompt_emb = torch.stack([
-                    torch.cat([x, torch.zeros(max_len - x.shape[0], H, device=x.device)], dim=0)
-                    for x in whole_prompt_emb_list
-                ])
+                    generated_texts = [out.outputs[0].text.strip() for out in outputs]
+                else:
+                    # No latent context (latent_steps=0): use text prompts directly
+                    generated_texts = self.model.vllm_generate_text_batch(
+                        final_agent_prompts,
+                        max_new_tokens=self.judger_max_new_tokens,
+                        temperature=self.temperature,
+                        top_p=self.top_p,
+                    )
 
-                # else:
-                    # Get full prompt embedding from cat with previous ones 
-                    # B L H B L H
-                    # whole_prompt_emb = torch.cat([past_embedding, curr_prompt_emb], dim=1)
-                
-                # pdb.set_trace()              
-                
-                # Use vLLM 
-                prompt_embeds_list = [
-                    {
-                        "prompt_embeds": embeds
-                    } for embeds in whole_prompt_emb 
-                ]
-                
-                
-                outputs = self.model.vllm_engine.generate(
-                    prompt_embeds_list,
-                    self.sampling_params,
-                )
-
-                generated_texts = [out.outputs[0].text.strip() for out in outputs]
-                    
                 for idx in range(batch_size):
                     text_out = generated_texts[idx].strip()
                     final_texts[idx] = text_out
@@ -491,9 +490,39 @@ class LatentMASMethod:
         results: List[Dict] = []
         for idx, item in enumerate(items):
             final_text = final_texts[idx]
-            pred = normalize_answer(extract_gsm8k_answer(final_text))
-            gold = item["gold"]
-            ok = (pred == gold) if (pred and gold) else False
+            if self.task in ['mbppplus', 'humanevalplus']:
+                pred = extract_markdown_python_block(final_text)
+                gold = item.get("gold", "")
+
+                if pred is None:
+                    ok = False
+                    error_msg = "python error: No python code block found"
+                else:
+                    python_code_to_exe = pred + "\n" + gold
+                    ok, error_msg = run_with_timeout(python_code_to_exe, timeout=10)
+                
+                print(f'=========================================')
+                print(f'Question {idx}')
+                print(f'error_msg: {error_msg}')
+
+            elif self.task in ["aime2024", "aime2025"]:
+                pred = normalize_answer(extract_gsm8k_answer(final_text))
+                gold = str(item.get("gold", "")).strip()
+                try:
+                    pred_int = int(pred)
+                    gold_int = int(gold)
+                    ok = (pred_int == gold_int)
+                    error_msg = None
+                except (ValueError, TypeError):
+                    ok = False
+                    error_msg = f'Value error in parsing answer. Pred: {pred}, Gold: {gold}'
+
+            else:
+                pred = normalize_answer(extract_gsm8k_answer(final_text))
+                gold = item.get("gold", "")
+                ok = (pred == gold) if (pred and gold) else False
+                error_msg = None
+
             results.append(
                 {
                     "question": item["question"],

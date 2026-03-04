@@ -895,226 +895,237 @@ class LatentMASPlus:
     # ===================================================================
     @torch.no_grad()
     def run_batch_vllm(self, items: List[Dict]) -> List[Dict]:
-        if len(items) > self.generate_bs:
-            raise ValueError("Batch size exceeds configured generate_bs")
+        raise NotImplementedError("vLLM backend not yet implemented for LatentMASPlus")
+        # if len(items) > self.generate_bs:
+        #     raise ValueError("Batch size exceeds configured generate_bs")
 
-        batch_size = len(items)
-        past_kv: Optional[Tuple] = None
-        current_model_name: Optional[str] = None
-        agent_traces: List[List[Dict]] = [[] for _ in range(batch_size)]
-        final_texts = ["" for _ in range(batch_size)]
+        # batch_size = len(items)
+        # past_kv: Optional[Tuple] = None
+        # current_model_name: Optional[str] = None
+        # agent_traces: List[List[Dict]] = [[] for _ in range(batch_size)]
+        # final_texts = ["" for _ in range(batch_size)]
 
-        embedding_record: List[torch.Tensor] = []
+        # embedding_record: List[torch.Tensor] = []
 
-        agent_pbar = tqdm(self.agents, desc="Agents", unit="agent")
-        for agent_idx, agent in enumerate(agent_pbar):
-            agent_pbar.set_description(f"Agent: {agent.name} ({agent.role})")
-            is_last_agent = (agent_idx == len(self.agents) - 1)
+        # agent_pbar = tqdm(self.agents, desc="Agents", unit="agent")
+        # for agent_idx, agent in enumerate(agent_pbar):
+        #     agent_pbar.set_description(f"Agent: {agent.name} ({agent.role})")
+        #     is_last_agent = (agent_idx == len(self.agents) - 1)
 
-            agent_model_name = self.agent_models[agent_idx]
-            agent_model = self.models[agent_model_name]
-            model_switched = (
-                current_model_name is not None
-                and agent_model_name != current_model_name
-            )
+        #     agent_model_name = self.agent_models[agent_idx]
+        #     agent_model = self.models[agent_model_name]
+        #     model_switched = (
+        #         current_model_name is not None
+        #         and agent_model_name != current_model_name
+        #     )
 
-            if self.args.prompt == "sequential":
-                batch_messages = [
-                    build_agent_message_sequential_latent_mas(
-                        role=agent.role, question=item["question"], context="",
-                        method=self.method_name, args=self.args,
-                    )
-                    for item in items
-                ]
-            elif self.args.prompt == "hierarchical":
-                batch_messages = [
-                    build_agent_message_hierarchical_latent_mas(
-                        role=agent.role, question=item["question"], context="",
-                        method=self.method_name, args=self.args,
-                    )
-                    for item in items
-                ]
+        #     if self.args.prompt == "sequential":
+        #         batch_messages = [
+        #             build_agent_message_sequential_latent_mas(
+        #                 role=agent.role, question=item["question"], context="",
+        #                 method=self.method_name, args=self.args,
+        #             )
+        #             for item in items
+        #         ]
+        #     elif self.args.prompt == "hierarchical":
+        #         batch_messages = [
+        #             build_agent_message_hierarchical_latent_mas(
+        #                 role=agent.role, question=item["question"], context="",
+        #                 method=self.method_name, args=self.args,
+        #             )
+        #             for item in items
+        #         ]
 
-            prompts, input_ids, attention_mask, tokens_batch = self.model.prepare_chat_batch(
-                batch_messages, add_generation_prompt=True,
-            )
+        #     prompts, input_ids, attention_mask, tokens_batch = self.model.prepare_chat_batch(
+        #         batch_messages, add_generation_prompt=True,
+        #     )
 
-            if not is_last_agent:
-                prev_past_len = _past_length(past_kv)
+        #     if not is_last_agent:
+        #         prev_past_len = _past_length(past_kv)
 
-                if self.args.think:
-                    wrapped_prompts = [f"{prompt}{self.args.think}" for prompt in prompts]
-                else:
-                    wrapped_prompts = prompts
+        #         if self.args.think:
+        #             wrapped_prompts = [f"{prompt}{self.args.think}" for prompt in prompts]
+        #         else:
+        #             wrapped_prompts = prompts
 
-                wrapped_encoded = self.model.tokenizer(
-                    wrapped_prompts, return_tensors="pt", padding=True, add_special_tokens=False,
-                )
-                wrapped_ids = wrapped_encoded["input_ids"].to(self.model.HF_device)
-                wrapped_mask = wrapped_encoded["attention_mask"].to(self.model.HF_device)
-                wrapped_tokens_batch: List[List[str]] = []
-                for ids_row, mask_row in zip(wrapped_ids, wrapped_mask):
-                    active_ids = ids_row[mask_row.bool()].tolist()
-                    wrapped_tokens_batch.append(self.model.tokenizer.convert_ids_to_tokens(active_ids))
+        #         wrapped_encoded = self.model.tokenizer(
+        #             wrapped_prompts, return_tensors="pt", padding=True, add_special_tokens=False,
+        #         )
+        #         wrapped_ids = wrapped_encoded["input_ids"].to(self.model.HF_device)
+        #         wrapped_mask = wrapped_encoded["attention_mask"].to(self.model.HF_device)
+        #         wrapped_tokens_batch: List[List[str]] = []
+        #         for ids_row, mask_row in zip(wrapped_ids, wrapped_mask):
+        #             active_ids = ids_row[mask_row.bool()].tolist()
+        #             wrapped_tokens_batch.append(self.model.tokenizer.convert_ids_to_tokens(active_ids))
 
-                past_kv, previous_hidden_embedding = self.model.generate_latent_batch_hidden_state(
-                    wrapped_ids,
-                    attention_mask=wrapped_mask,
-                    latent_steps=self.latent_steps,
-                    past_key_values=past_kv,
-                )
-                if self.sequential_info_only or self.latent_only:
-                    new_past_len = _past_length(past_kv)
-                    tokens_added = new_past_len - prev_past_len
-                    tokens_to_keep = self.latent_steps if self.latent_only else tokens_added
-                    past_kv = self._truncate_past(past_kv, tokens_to_keep)
+        #         past_kv, previous_hidden_embedding = self.model.generate_latent_batch_hidden_state(
+        #             wrapped_ids,
+        #             attention_mask=wrapped_mask,
+        #             latent_steps=self.latent_steps,
+        #             past_key_values=past_kv,
+        #         )
+        #         if self.sequential_info_only or self.latent_only:
+        #             new_past_len = _past_length(past_kv)
+        #             tokens_added = new_past_len - prev_past_len
+        #             tokens_to_keep = self.latent_steps if self.latent_only else tokens_added
+        #             past_kv = self._truncate_past(past_kv, tokens_to_keep)
 
-                if self.latent_only:
-                    if self.latent_steps > 0:
-                        previous_hidden_embedding = previous_hidden_embedding[:, -self.latent_steps:, :]
-                    else:
-                        previous_hidden_embedding = previous_hidden_embedding[:, 0:0, :]
+        #         if self.latent_only:
+        #             if self.latent_steps > 0:
+        #                 previous_hidden_embedding = previous_hidden_embedding[:, -self.latent_steps:, :]
+        #             else:
+        #                 previous_hidden_embedding = previous_hidden_embedding[:, 0:0, :]
 
-                # Transfer via intersection alignment on model switch
-                if model_switched and len(embedding_record) > 0:
-                    prev_model = self.models[current_model_name]
-                    stacked = torch.cat(embedding_record, dim=1)
-                    transferred = self._transfer_hidden_states(stacked, prev_model, agent_model)
-                    embedding_record = [transferred]
+        #         # Transfer via intersection alignment on model switch
+        #         if model_switched and len(embedding_record) > 0:
+        #             prev_model = self.models[current_model_name]
+        #             stacked = torch.cat(embedding_record, dim=1)
+        #             transferred = self._transfer_hidden_states(stacked, prev_model, agent_model)
+        #             embedding_record = [transferred]
 
-                embedding_record.append(previous_hidden_embedding)
-                current_model_name = agent_model_name
+        #         embedding_record.append(previous_hidden_embedding)
+        #         current_model_name = agent_model_name
 
-                if self.sequential_info_only or self.latent_only:
-                    embedding_record = embedding_record[-1:]
+        #         if self.sequential_info_only or self.latent_only:
+        #             embedding_record = embedding_record[-1:]
 
-                for idx in range(batch_size):
-                    mask = wrapped_mask[idx].bool()
-                    trimmed_ids = wrapped_ids[idx][mask].to("cpu").tolist()
-                    agent_traces[idx].append({
-                        "name": agent.name, "role": agent.role,
-                        "input": wrapped_prompts[idx],
-                        "input_ids": trimmed_ids,
-                        "input_tokens": wrapped_tokens_batch[idx],
-                        "latent_steps": self.latent_steps,
-                        "output": "",
-                    })
-            else:
-                # Last agent: generate final text
-                past_embedding = torch.cat(embedding_record, dim=1).to(self.vllm_device)
+        #         for idx in range(batch_size):
+        #             mask = wrapped_mask[idx].bool()
+        #             trimmed_ids = wrapped_ids[idx][mask].to("cpu").tolist()
+        #             agent_traces[idx].append({
+        #                 "name": agent.name, "role": agent.role,
+        #                 "input": wrapped_prompts[idx],
+        #                 "input_ids": trimmed_ids,
+        #                 "input_tokens": wrapped_tokens_batch[idx],
+        #                 "latent_steps": self.latent_steps,
+        #                 "output": "",
+        #             })
+        #     else:
+        #         # Last agent: generate final text
+        #         if self.args.think:
+        #             final_agent_prompts = [f"{prompt}{self.args.think}" for prompt in prompts]
+        #         else:
+        #             final_agent_prompts = prompts
 
-                # Transfer if last agent uses a different model
-                if model_switched and current_model_name is not None:
-                    prev_model = self.models[current_model_name]
-                    past_embedding = self._transfer_hidden_states(
-                        past_embedding, prev_model, agent_model,
-                    )
+        #         if self.latent_steps > 0 and embedding_record:
+        #             past_embedding = torch.cat(embedding_record, dim=1).to(self.vllm_device)
 
-                if self.args.think:
-                    final_agent_prompts = [f"{prompt}{self.args.think}" for prompt in prompts]
-                else:
-                    final_agent_prompts = prompts
+        #             # Transfer if last agent uses a different model
+        #             if model_switched and current_model_name is not None:
+        #                 prev_model = self.models[current_model_name]
+        #                 past_embedding = self._transfer_hidden_states(
+        #                     past_embedding, prev_model, agent_model,
+        #                 )
 
-                final_agent_encoded = self.model.tokenizer(
-                    final_agent_prompts, return_tensors="pt", padding=True, add_special_tokens=False,
-                )
-                final_agent_encoded_ids = final_agent_encoded["input_ids"].to(self.model.HF_device)
-                curr_prompt_emb = self.model.embedding_layer(final_agent_encoded_ids).squeeze(0).to(self.vllm_device)
+        #             final_agent_encoded = self.model.tokenizer(
+        #                 final_agent_prompts, return_tensors="pt", padding=True, add_special_tokens=False,
+        #             )
+        #             final_agent_encoded_ids = final_agent_encoded["input_ids"].to(self.model.HF_device)
+        #             # Keep batch dim
+        #             curr_prompt_emb = self.model.embedding_layer(final_agent_encoded_ids).to(self.vllm_device)
 
-                # Handle latent embedding insertion position
-                len_of_left = []
-                for p in final_agent_prompts:
-                    idx_pos = p.find("<|im_start|>user\n")
-                    if idx_pos >= 0:
-                        left = p[:idx_pos + len("<|im_start|>user\n")]
-                    else:
-                        left = ""
-                    len_of_left.append(len(self.model.tokenizer(left)["input_ids"]) if left else 0)
+        #             # Handle latent embedding insertion position
+        #             len_of_left = []
+        #             for p in final_agent_prompts:
+        #                 idx_pos = p.find("<|im_start|>user\n")
+        #                 if idx_pos >= 0:
+        #                     left = p[:idx_pos + len("<|im_start|>user\n")]
+        #                 else:
+        #                     left = ""
+        #                 len_of_left.append(len(self.model.tokenizer(left)["input_ids"]) if left else 0)
 
-                B, L, H = curr_prompt_emb.shape
-                _, Lp, Hp = past_embedding.shape
+        #             B, L, H = curr_prompt_emb.shape
+        #             _, Lp, _ = past_embedding.shape
 
-                whole_prompt_emb_list = []
-                for i in range(B):
-                    insert_idx = len_of_left[i]
-                    left_emb = curr_prompt_emb[i, :insert_idx, :]
-                    right_emb = curr_prompt_emb[i, insert_idx:, :]
-                    combined = torch.cat([left_emb, past_embedding[i], right_emb], dim=0)
-                    whole_prompt_emb_list.append(combined)
+        #             whole_prompt_emb_list = []
+        #             for i in range(B):
+        #                 insert_idx = len_of_left[i]
+        #                 left_emb = curr_prompt_emb[i, :insert_idx, :]
+        #                 right_emb = curr_prompt_emb[i, insert_idx:, :]
+        #                 combined = torch.cat([left_emb, past_embedding[i], right_emb], dim=0)
+        #                 whole_prompt_emb_list.append(combined)
 
-                max_len = max(x.shape[0] for x in whole_prompt_emb_list)
-                whole_prompt_emb = torch.stack([
-                    torch.cat([x, torch.zeros(max_len - x.shape[0], H, device=x.device)], dim=0)
-                    for x in whole_prompt_emb_list
-                ])
+        #             max_len = max(x.shape[0] for x in whole_prompt_emb_list)
+        #             whole_prompt_emb = torch.stack([
+        #                 torch.cat([x, torch.zeros(max_len - x.shape[0], H, device=x.device)], dim=0)
+        #                 for x in whole_prompt_emb_list
+        #             ])
 
-                prompt_embeds_list = [
-                    {"prompt_embeds": embeds} for embeds in whole_prompt_emb
-                ]
+        #             prompt_embeds_list = [
+        #                 {"prompt_embeds": embeds} for embeds in whole_prompt_emb
+        #             ]
 
-                outputs = self.model.vllm_engine.generate(
-                    prompt_embeds_list, self.sampling_params,
-                )
+        #             outputs = self.model.vllm_engine.generate(
+        #                 prompt_embeds_list, self.sampling_params,
+        #             )
 
-                generated_texts = [out.outputs[0].text.strip() for out in outputs]
+        #             generated_texts = [out.outputs[0].text.strip() for out in outputs]
+        #         else:
+        #             # No latent context (latent_steps=0): use text prompts directly
+        #             generated_texts = self.model.vllm_generate_text_batch(
+        #                 final_agent_prompts,
+        #                 max_new_tokens=self.judger_max_new_tokens,
+        #                 temperature=self.temperature,
+        #                 top_p=self.top_p,
+        #             )
 
-                for idx in range(batch_size):
-                    text_out = generated_texts[idx].strip()
-                    final_texts[idx] = text_out
-                    agent_traces[idx].append({
-                        "name": agent.name, "role": agent.role,
-                        "input": final_agent_prompts[idx],
-                        "output": text_out,
-                    })
+        #         for idx in range(batch_size):
+        #             text_out = generated_texts[idx].strip()
+        #             final_texts[idx] = text_out
+        #             agent_traces[idx].append({
+        #                 "name": agent.name, "role": agent.role,
+        #                 "input": final_agent_prompts[idx],
+        #                 "output": text_out,
+        #             })
 
-        # Assemble results
-        results: List[Dict] = []
-        for idx, item in enumerate(items):
-            final_text = final_texts[idx]
-            if self.task in ["mbppplus", "humanevalplus"]:
-                pred = extract_markdown_python_block(final_text)
-                gold = item.get("gold", "")
-                if pred is None:
-                    ok = False
-                    error_msg = "python error: No python code block found"
-                else:
-                    python_code_to_exe = pred + "\n" + gold
-                    ok, error_msg = run_with_timeout(python_code_to_exe, timeout=10)
-                print(f"=========================================")
-                print(f"Question {idx}")
-                print(f"error_msg: {error_msg}")
+        # # Assemble results
+        # results: List[Dict] = []
+        # for idx, item in enumerate(items):
+        #     final_text = final_texts[idx]
+        #     if self.task in ["mbppplus", "humanevalplus"]:
+        #         pred = extract_markdown_python_block(final_text)
+        #         gold = item.get("gold", "")
+        #         if pred is None:
+        #             ok = False
+        #             error_msg = "python error: No python code block found"
+        #         else:
+        #             python_code_to_exe = pred + "\n" + gold
+        #             ok, error_msg = run_with_timeout(python_code_to_exe, timeout=10)
+        #         print(f"=========================================")
+        #         print(f"Question {idx}")
+        #         print(f"error_msg: {error_msg}")
 
-            elif self.task in ["aime2024", "aime2025"]:
-                pred = normalize_answer(extract_gsm8k_answer(final_text))
-                gold = str(item.get("gold", "")).strip()
-                try:
-                    if pred is None or pred == "":
-                        ok = False
-                        error_msg = f"Failed to extract answer from: {final_text[:100]}..."
-                    else:
-                        pred_int = int(pred)
-                        gold_int = int(gold)
-                        ok = pred_int == gold_int
-                        error_msg = None
-                except ValueError:
-                    ok = False
-                    error_msg = f"Value error in parsing answer. Pred: {pred}, Gold: {gold}"
-            else:
-                pred = normalize_answer(extract_gsm8k_answer(final_text))
-                gold = item.get("gold", "")
-                ok = (pred == gold) if (pred and gold) else False
-                error_msg = None
+        #     elif self.task in ["aime2024", "aime2025"]:
+        #         pred = normalize_answer(extract_gsm8k_answer(final_text))
+        #         gold = str(item.get("gold", "")).strip()
+        #         try:
+        #             if pred is None or pred == "":
+        #                 ok = False
+        #                 error_msg = f"Failed to extract answer from: {final_text[:100]}..."
+        #             else:
+        #                 pred_int = int(pred)
+        #                 gold_int = int(gold)
+        #                 ok = pred_int == gold_int
+        #                 error_msg = None
+        #         except ValueError:
+        #             ok = False
+        #             error_msg = f"Value error in parsing answer. Pred: {pred}, Gold: {gold}"
+        #     else:
+        #         pred = normalize_answer(extract_gsm8k_answer(final_text))
+        #         gold = item.get("gold", "")
+        #         ok = (pred == gold) if (pred and gold) else False
+        #         error_msg = None
 
-            results.append({
-                "question": item["question"],
-                "gold": gold,
-                "solution": item["solution"],
-                "prediction": pred,
-                "raw_prediction": final_text,
-                "agents": agent_traces[idx],
-                "correct": ok,
-            })
-        return results
+        #     results.append({
+        #         "question": item["question"],
+        #         "gold": gold,
+        #         "solution": item["solution"],
+        #         "prediction": pred,
+        #         "raw_prediction": final_text,
+        #         "agents": agent_traces[idx],
+        #         "correct": ok,
+        #     })
+        # return results
 
     # ===================================================================
     # run_item
