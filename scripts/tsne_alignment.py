@@ -3,19 +3,20 @@
 t-SNE Visualization of Alignment Quality for Three LatentMAS Methods
 ====================================================================
 
-Visualizes how well each method aligns source model hidden states to the
-target model's input embedding space:
+Visualizes alignment quality at two levels:
 
-1. **latent_mas** (same model):  Self-alignment W = (W_out^T W_out + λI)^{-1} W_out^T W_in
-2. **latent_mas_hybrid** (same family, different size):  Full-vocab cross-model alignment
-3. **latent_mas_plus** (different families):  Intersection-vocab cross-model alignment
+**Row 1 – Vocabulary-level alignment**:
+  Samples vocabulary tokens and compares W_out[t] @ W_align vs W_in[t].
 
-For each method we sample N shared vocabulary tokens and plot:
-  - Source hidden vectors  (W_out_A[t])
-  - Aligned embeddings     (W_out_A[t] @ W_alignment)
-  - Target input embeddings (W_in_B[t])
+**Row 2 – Inference-level alignment** (real token test):
+  Runs model A on a test text to obtain actual last-layer hidden states,
+  extracts predicted tokens, looks up their input embeddings in the target
+  model, and compares  h_t @ W_align  vs  W_in_B[predicted_token_t].
 
-A perfect alignment means "aligned" and "target" points overlap.
+Methods:
+1. **latent_mas** (same model):  Self-alignment
+2. **latent_mas_hybrid** (same family, different size):  Full-vocab cross-model
+3. **latent_mas_plus** (different families):  Intersection-vocab cross-model
 
 Usage
 -----
@@ -24,6 +25,7 @@ Usage
         --model_b_hybrid Qwen/Qwen3-8B \
         --model_b_plus meta-llama/Llama-3.1-8B \
         --n_tokens 1000 \
+        --n_samples 200 \
         --perplexity 30 \
         --seed 42 \
         --output figures/tsne_alignment.png
@@ -39,6 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from datasets import load_dataset
 from sklearn.manifold import TSNE
 
 # ── add project root to path ─────────────────────────────────────────────
@@ -79,8 +82,8 @@ def build_hybrid_alignment(model_a, model_b, lambda_reg: float = 1e-5):
     W_in_B = model_b.get_input_embeddings().weight.detach().float()   # [V_B, d_B]
     V_A, d_A = W_out_A.shape
     V_B, d_B = W_in_B.shape
+    min_V = min(V_A, V_B)
     if V_A != V_B:
-        min_V = min(V_A, V_B)
         W_out_A = W_out_A[:min_V]
         W_in_B = W_in_B[:min_V]
         print(f"  [hybrid] Vocab size mismatch ({V_A} vs {V_B}), using first {min_V}")
@@ -88,7 +91,7 @@ def build_hybrid_alignment(model_a, model_b, lambda_reg: float = 1e-5):
     rhs = W_out_A.T @ W_in_B
     W_align = torch.linalg.solve(gram, rhs)  # [d_A, d_B]
     target_norm = W_in_B.norm(dim=1).mean()
-    return W_align, target_norm, min(V_A, V_B)
+    return W_align, target_norm, min_V
 
 
 def build_plus_alignment(model_a, model_b, tokenizer_a, tokenizer_b,
@@ -133,6 +136,78 @@ def apply_alignment(hidden: torch.Tensor, W_align: torch.Tensor,
 
 
 # =========================================================================
+# Dataset & Inference helpers
+# =========================================================================
+
+def load_gsm8k_questions(n_samples: int, seed: int = 42):
+    """
+    Load n_samples questions from GSM8K test set.
+    Returns list of question strings.
+    """
+    ds = load_dataset("gsm8k", "main", split="test")
+    rng = np.random.RandomState(seed)
+    indices = rng.choice(len(ds), size=min(n_samples, len(ds)), replace=False)
+    questions = [ds[int(i)]["question"].strip() for i in indices]
+    return questions
+
+
+@torch.no_grad()
+def get_inference_hidden_states(model, tokenizer, text, device="cpu"):
+    """
+    Run model forward pass on text and return:
+      - last_hidden: [seq_len, hidden_dim]  last-layer hidden states
+      - predicted_ids: [seq_len]  predicted next-token IDs (argmax of logits)
+      - input_ids: [seq_len]  the input token IDs
+    """
+    inputs = tokenizer(text, return_tensors="pt").to(device)
+    outputs = model(**inputs, output_hidden_states=True)
+    last_hidden = outputs.hidden_states[-1][0].cpu().float()   # [seq_len, d]
+    logits = outputs.logits[0].cpu().float()                   # [seq_len, V]
+    predicted_ids = logits.argmax(dim=-1)                       # [seq_len]
+    return last_hidden, predicted_ids, inputs["input_ids"][0].cpu()
+
+
+@torch.no_grad()
+def collect_inference_vectors_gsm8k(model, tokenizer, questions, device="cpu"):
+    """
+    Run model on each GSM8K question and concatenate hidden states.
+    Returns:
+      all_hidden:       [total_tokens, d]  last-layer hidden states
+      all_predicted_ids: [total_tokens]    predicted next-token IDs
+    """
+    all_hidden, all_pred = [], []
+    for i, q in enumerate(questions):
+        h, p, _ = get_inference_hidden_states(model, tokenizer, q, device)
+        all_hidden.append(h)
+        all_pred.append(p)
+        if (i + 1) % 10 == 0 or i == len(questions) - 1:
+            total = sum(x.shape[0] for x in all_hidden)
+            print(f"    Processed {i+1}/{len(questions)} questions, "
+                  f"{total} tokens so far")
+    return torch.cat(all_hidden, dim=0), torch.cat(all_pred, dim=0)
+
+
+def map_tokens_across_tokenizers(predicted_ids, tok_src, tok_tgt):
+    """
+    Map predicted token IDs from source tokenizer to target tokenizer
+    via token string matching (for different-family models).
+
+    Returns:
+      positions: list of sequence positions where mapping succeeded
+      tgt_ids:   corresponding token IDs in the target vocabulary
+    """
+    vocab_src_inv = {v: k for k, v in tok_src.get_vocab().items()}
+    vocab_tgt = tok_tgt.get_vocab()
+    positions, tgt_ids = [], []
+    for pos, src_id in enumerate(predicted_ids.tolist()):
+        token_str = vocab_src_inv.get(src_id)
+        if token_str and token_str in vocab_tgt:
+            positions.append(pos)
+            tgt_ids.append(vocab_tgt[token_str])
+    return positions, tgt_ids
+
+
+# =========================================================================
 # Model loading helper
 # =========================================================================
 
@@ -172,10 +247,10 @@ def sample_token_vectors(W_out_src, W_in_tgt, W_align, target_norm,
 # t-SNE + Plotting
 # =========================================================================
 
-def run_tsne_and_plot(data_dict, perplexity, seed, output_path, method_name):
+def run_tsne(data_dict, perplexity, seed):
     """
     data_dict: {label: ndarray of shape [N, D]}
-    Runs t-SNE on the concatenation, then plots per-label with different colors.
+    Runs t-SNE on the concatenation, returns dict of embedded 2D arrays.
     """
     labels_list = list(data_dict.keys())
     arrays = [data_dict[k] for k in labels_list]
@@ -184,11 +259,11 @@ def run_tsne_and_plot(data_dict, perplexity, seed, output_path, method_name):
 
     tsne = TSNE(
         n_components=2,
-        perplexity=min(perplexity, combined.shape[0] // 4),
+        perplexity=min(perplexity, max(2, combined.shape[0] // 4)),
         random_state=seed,
         init="pca",
         learning_rate="auto",
-        n_iter=1000,
+        max_iter=1000,
     )
     embedded = tsne.fit_transform(combined)
 
@@ -207,8 +282,8 @@ def plot_single_method(ax, parts, title, colors, markers):
     for (label, pts), c, m in zip(parts.items(), colors, markers):
         ax.scatter(pts[:, 0], pts[:, 1], c=c, marker=m, s=12, alpha=0.55,
                    label=label, edgecolors="none")
-    ax.set_title(title, fontsize=13, fontweight="bold")
-    ax.legend(fontsize=8, loc="upper right", framealpha=0.8)
+    ax.set_title(title, fontsize=11, fontweight="bold")
+    ax.legend(fontsize=7, loc="upper right", framealpha=0.8)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -226,24 +301,27 @@ def compute_alignment_score(aligned: np.ndarray, target: np.ndarray) -> float:
 # =========================================================================
 
 def parse_args():
-    p = argparse.ArgumentParser(description="t-SNE alignment visualization for LatentMAS methods")
+    p = argparse.ArgumentParser(
+        description="t-SNE alignment visualization for LatentMAS methods")
     p.add_argument("--model_a", type=str, required=True,
-                   help="Base model (used by all agents in latent_mas, and as model_A in hybrid/plus)")
+                   help="Base model (model A in all methods)")
     p.add_argument("--model_b_hybrid", type=str, default=None,
                    help="Target model for latent_mas_hybrid (same family, different size)")
     p.add_argument("--model_b_plus", type=str, default=None,
                    help="Target model for latent_mas_plus (different family)")
     p.add_argument("--n_tokens", type=int, default=1000,
-                   help="Number of vocabulary tokens to sample")
+                   help="Number of vocabulary tokens to sample for vocab-level test")
+    p.add_argument("--n_samples", type=int, default=200,
+                   help="Number of GSM8K questions to sample for inference-level test")
     p.add_argument("--perplexity", type=float, default=30,
                    help="t-SNE perplexity")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--lambda_reg", type=float, default=1e-5,
-                   help="Ridge regularization for alignment")
+                   help="Ridge regularization for self/hybrid alignment")
     p.add_argument("--lambda_plus", type=float, default=1e-4,
                    help="Ridge regularization for intersection alignment")
-    p.add_argument("--device", type=str, default="cpu",
-                   help="Device for computation (cpu recommended for visualization)")
+    p.add_argument("--device", type=str, default="cuda",
+                   help="Device for computation")
     p.add_argument("--output", type=str, default="figures/tsne_alignment.png",
                    help="Output image path")
     return p.parse_args()
@@ -269,6 +347,7 @@ def main():
     print(f"  model_b_hybrid: {args.model_b_hybrid or '(skipped)'}")
     print(f"  model_b_plus:   {args.model_b_plus or '(skipped)'}")
     print(f"  n_tokens:       {args.n_tokens}")
+    print(f"  n_samples:      {args.n_samples} (GSM8K)")
     print(f"  perplexity:     {args.perplexity}")
     print(f"{'='*60}\n")
 
@@ -279,7 +358,6 @@ def main():
     model_b_plus, tok_b_plus = None, None
 
     if args.model_b_hybrid:
-        # same-family: may share tokenizer
         if args.model_b_hybrid == args.model_a:
             model_b_hybrid, tok_b_hybrid = model_a, tok_a
         else:
@@ -295,136 +373,282 @@ def main():
             model_b_plus, tok_b_plus = load_model_and_tokenizer(
                 args.model_b_plus, args.device)
 
-    # ── Extract weight matrices (float32 on CPU for t-SNE) ──────────────
+    # ── Extract weight matrices (float32 on CPU) ────────────────────────
     W_out_A = model_a.get_output_embeddings().weight.detach().cpu().float()
     W_in_A = model_a.get_input_embeddings().weight.detach().cpu().float()
 
-    # ── Method 1: latent_mas (self-alignment) ───────────────────────────
+    # ================================================================
+    # Part 1: Build alignment matrices
+    # ================================================================
+
+    # -- Method 1: self-alignment --
     print("\n[1/3] Computing self-alignment (latent_mas) ...")
     W_self, tn_self = build_self_alignment(model_a, args.lambda_reg)
     W_self, tn_self = W_self.cpu(), tn_self.cpu()
-    V_A = W_out_A.shape[0]
-    all_idx = list(range(V_A))
-    src_self, aligned_self, tgt_self = sample_token_vectors(
-        W_out_A, W_in_A, W_self, tn_self, all_idx, all_idx, args.n_tokens, rng)
-    cos_self = compute_alignment_score(aligned_self, tgt_self)
-    print(f"  Self-alignment cosine similarity: {cos_self:.4f}")
 
-    # ── Method 2: latent_mas_hybrid (same family, cross-size) ───────────
-    src_hybrid, aligned_hybrid, tgt_hybrid, cos_hybrid = None, None, None, None
+    # -- Method 2: hybrid --
+    W_hyb, tn_hyb, min_V_hyb = None, None, None
+    W_in_B_hybrid = None
     if "latent_mas_hybrid" in methods_to_plot:
         print("\n[2/3] Computing hybrid alignment (latent_mas_hybrid) ...")
         W_in_B_hybrid = model_b_hybrid.get_input_embeddings().weight.detach().cpu().float()
         W_hyb, tn_hyb, min_V_hyb = build_hybrid_alignment(
             model_a, model_b_hybrid, args.lambda_reg)
         W_hyb, tn_hyb = W_hyb.cpu(), tn_hyb.cpu()
-        shared_idx = list(range(min_V_hyb))
-        src_hybrid, aligned_hybrid, tgt_hybrid = sample_token_vectors(
-            W_out_A, W_in_B_hybrid, W_hyb, tn_hyb, shared_idx, shared_idx,
-            args.n_tokens, rng)
-        cos_hybrid = compute_alignment_score(aligned_hybrid, tgt_hybrid)
-        print(f"  Hybrid alignment cosine similarity: {cos_hybrid:.4f}")
 
-    # ── Method 3: latent_mas_plus (different family, intersection) ──────
-    src_plus, aligned_plus, tgt_plus, cos_plus = None, None, None, None
+    # -- Method 3: plus --
+    W_plus, tn_plus, idx_a_plus, idx_b_plus = None, None, None, None
+    W_in_B_plus = None
     if "latent_mas_plus" in methods_to_plot:
         print("\n[3/3] Computing intersection alignment (latent_mas_plus) ...")
         W_in_B_plus = model_b_plus.get_input_embeddings().weight.detach().cpu().float()
         W_plus, tn_plus, idx_a_plus, idx_b_plus = build_plus_alignment(
             model_a, model_b_plus, tok_a, tok_b_plus, args.lambda_plus)
         W_plus, tn_plus = W_plus.cpu(), tn_plus.cpu()
-        src_plus, aligned_plus, tgt_plus = sample_token_vectors(
-            W_out_A, W_in_B_plus, W_plus, tn_plus, idx_a_plus, idx_b_plus,
-            args.n_tokens, rng)
-        cos_plus = compute_alignment_score(aligned_plus, tgt_plus)
-        print(f"  Plus alignment cosine similarity: {cos_plus:.4f}")
 
-    # ── t-SNE ───────────────────────────────────────────────────────────
+    # ================================================================
+    # Part 2: Vocabulary-level alignment vectors
+    # ================================================================
+    print("\n--- Vocabulary-level alignment ---")
+    V_A = W_out_A.shape[0]
+    all_idx = list(range(V_A))
+
+    src_self, aligned_self, tgt_self = sample_token_vectors(
+        W_out_A, W_in_A, W_self, tn_self, all_idx, all_idx, args.n_tokens, rng)
+    cos_self = compute_alignment_score(aligned_self, tgt_self)
+    print(f"  Self-alignment cosine: {cos_self:.4f}")
+
+    cos_hybrid_vocab = None
+    src_hybrid, aligned_hybrid, tgt_hybrid = None, None, None
+    if W_hyb is not None:
+        shared_idx = list(range(min_V_hyb))
+        src_hybrid, aligned_hybrid, tgt_hybrid = sample_token_vectors(
+            W_out_A, W_in_B_hybrid, W_hyb, tn_hyb,
+            shared_idx, shared_idx, args.n_tokens, rng)
+        cos_hybrid_vocab = compute_alignment_score(aligned_hybrid, tgt_hybrid)
+        print(f"  Hybrid alignment cosine: {cos_hybrid_vocab:.4f}")
+
+    cos_plus_vocab = None
+    src_plus, aligned_plus, tgt_plus = None, None, None
+    if W_plus is not None:
+        src_plus, aligned_plus, tgt_plus = sample_token_vectors(
+            W_out_A, W_in_B_plus, W_plus, tn_plus,
+            idx_a_plus, idx_b_plus, args.n_tokens, rng)
+        cos_plus_vocab = compute_alignment_score(aligned_plus, tgt_plus)
+        print(f"  Plus alignment cosine: {cos_plus_vocab:.4f}")
+
+    # ================================================================
+    # Part 3: Inference-level alignment (real hidden states from GSM8K)
+    # ================================================================
+    print(f"\n--- Inference-level alignment (GSM8K, {args.n_samples} samples) ---")
+    print(f"  Loading GSM8K test set ...")
+    gsm8k_questions = load_gsm8k_questions(args.n_samples, args.seed)
+    print(f"  Sampled {len(gsm8k_questions)} questions")
+    print(f"  Example: \"{gsm8k_questions[0][:80]}...\"")
+
+    print(f"  Running model A inference ...")
+    last_hidden, predicted_ids = collect_inference_vectors_gsm8k(
+        model_a, tok_a, gsm8k_questions, args.device)
+    n_pos = last_hidden.shape[0]
+    print(f"  Total tokens collected: {n_pos}")
+
+    # Decode a few predicted tokens for sanity check
+    pred_text = tok_a.decode(predicted_ids[:10])
+    print(f"  First 10 predicted next-tokens: {repr(pred_text)}")
+
+    # -- Self-alignment inference --
+    # All vectors in d_A space: hidden[t], aligned[t]=hidden@W_self, target=W_in_A[pred]
+    aligned_infer_self = apply_alignment(last_hidden, W_self, tn_self).numpy()
+    tgt_infer_self = W_in_A[predicted_ids].numpy()
+    hidden_self_np = last_hidden.numpy()
+    cos_infer_self = compute_alignment_score(aligned_infer_self, tgt_infer_self)
+    print(f"  [Inference] Self-alignment cosine: {cos_infer_self:.4f}")
+
+    # -- Hybrid inference --
+    cos_infer_hybrid = None
+    aligned_infer_hybrid, tgt_infer_hybrid = None, None
+    if W_hyb is not None:
+        # Same family → token IDs directly correspond; filter to valid range
+        valid_mask = predicted_ids < min_V_hyb
+        valid_pos = torch.where(valid_mask)[0]
+        if len(valid_pos) > 0:
+            h_hyb = last_hidden[valid_pos]
+            pred_hyb = predicted_ids[valid_pos]
+            aligned_infer_hybrid = apply_alignment(h_hyb, W_hyb, tn_hyb).numpy()
+            tgt_infer_hybrid = W_in_B_hybrid[pred_hyb].numpy()
+            cos_infer_hybrid = compute_alignment_score(
+                aligned_infer_hybrid, tgt_infer_hybrid)
+            print(f"  [Inference] Hybrid alignment cosine: {cos_infer_hybrid:.4f} "
+                  f"({len(valid_pos)}/{n_pos} tokens valid)")
+        else:
+            print("  [Inference] Hybrid: no valid tokens found")
+
+    # -- Plus inference --
+    cos_infer_plus = None
+    aligned_infer_plus, tgt_infer_plus = None, None
+    if W_plus is not None:
+        positions, tgt_ids = map_tokens_across_tokenizers(
+            predicted_ids, tok_a, tok_b_plus)
+        if len(positions) > 0:
+            h_plus = last_hidden[torch.tensor(positions, dtype=torch.long)]
+            aligned_infer_plus = apply_alignment(h_plus, W_plus, tn_plus).numpy()
+            tgt_infer_plus = W_in_B_plus[
+                torch.tensor(tgt_ids, dtype=torch.long)].numpy()
+            cos_infer_plus = compute_alignment_score(
+                aligned_infer_plus, tgt_infer_plus)
+            print(f"  [Inference] Plus alignment cosine: {cos_infer_plus:.4f} "
+                  f"({len(positions)}/{n_pos} tokens mapped)")
+        else:
+            print("  [Inference] Plus: no tokens could be mapped")
+
+    # ================================================================
+    # Part 4: t-SNE Visualization  (2 rows × n_methods columns)
+    #   Row 1 = Vocabulary-level,  Row 2 = Inference-level
+    # ================================================================
     print("\nRunning t-SNE ...")
 
     # Color scheme
-    COLOR_SRC = "#E74C3C"      # red   – source hidden states
+    COLOR_SRC = "#E74C3C"      # red   – source / hidden states
     COLOR_ALIGNED = "#2ECC71"  # green – aligned embeddings
     COLOR_TGT = "#3498DB"      # blue  – target embeddings
-    colors = [COLOR_SRC, COLOR_ALIGNED, COLOR_TGT]
-    markers = ["o", "^", "s"]
+    colors3 = [COLOR_SRC, COLOR_ALIGNED, COLOR_TGT]
+    markers3 = ["o", "^", "s"]
+    colors2 = [COLOR_ALIGNED, COLOR_TGT]
+    markers2 = ["^", "s"]
 
-    fig, axes = plt.subplots(1, n_methods, figsize=(7 * n_methods, 6),
+    fig, axes = plt.subplots(2, n_methods, figsize=(7 * n_methods, 12),
                               squeeze=False)
-    axes = axes.flatten()
 
-    panel_idx = 0
+    # ── Row 1: Vocabulary-level alignment ───────────────────────────────
+    col = 0
 
-    # --- Panel 1: latent_mas ---
-    data_self = {
-        f"Source (W_out)": src_self,
-        f"Aligned (W_out @ W_self)": aligned_self,
-        f"Target (W_in)": tgt_self,
+    # --- Panel (0, 0): latent_mas vocab ---
+    data_self_v = {
+        "Source (W_out)": src_self,
+        "Aligned (W_out @ W_self)": aligned_self,
+        "Target (W_in)": tgt_self,
     }
-    parts_self = run_tsne_and_plot(data_self, args.perplexity, args.seed,
-                                    args.output, "latent_mas")
+    parts_self_v = run_tsne(data_self_v, args.perplexity, args.seed)
     plot_single_method(
-        axes[panel_idx], parts_self,
-        f"latent_mas (same model)\n"
+        axes[0, col], parts_self_v,
+        f"[Vocab] latent_mas (same model)\n"
         f"{os.path.basename(args.model_a)}\n"
-        f"cos_sim = {cos_self:.4f}",
-        colors, markers)
-    panel_idx += 1
+        f"cos = {cos_self:.4f}",
+        colors3, markers3)
+    col += 1
 
-    # --- Panel 2: latent_mas_hybrid ---
+    # --- Panel (0, 1): latent_mas_hybrid vocab ---
     if "latent_mas_hybrid" in methods_to_plot:
-        # Aligned and target live in model_b_hybrid's embedding space,
-        # but source lives in model_a's space (different dim potentially).
-        # We project source into target space via W_hyb for a fair comparison,
-        # OR we run t-SNE only on aligned vs target.
-
-        # Since source dim != target dim for hybrid, we visualize 
-        # aligned vs target in the target space, plus a separate panel
-        # for source in its own space.
-        # For clarity we project everything into target dim space.
-        src_hybrid_projected = (torch.from_numpy(src_hybrid).float() @ W_hyb).numpy()
-        # normalize projected source same way
-        src_norms = np.linalg.norm(src_hybrid_projected, axis=1, keepdims=True) + 1e-8
-        src_hybrid_projected = src_hybrid_projected * (tn_hyb.item() / src_norms)
-
-        data_hyb = {
-            f"Source (projected)": src_hybrid_projected,
-            f"Aligned (W_out_A @ W_cross)": aligned_hybrid,
-            f"Target (W_in_B)": tgt_hybrid,
+        src_hyb_proj = (torch.from_numpy(src_hybrid).float() @ W_hyb).numpy()
+        src_norms = np.linalg.norm(src_hyb_proj, axis=1, keepdims=True) + 1e-8
+        src_hyb_proj = src_hyb_proj * (tn_hyb.item() / src_norms)
+        data_hyb_v = {
+            "Source (projected)": src_hyb_proj,
+            "Aligned (W_out_A @ W_cross)": aligned_hybrid,
+            "Target (W_in_B)": tgt_hybrid,
         }
-        parts_hyb = run_tsne_and_plot(data_hyb, args.perplexity, args.seed + 1,
-                                       args.output, "latent_mas_hybrid")
+        parts_hyb_v = run_tsne(data_hyb_v, args.perplexity, args.seed + 1)
         plot_single_method(
-            axes[panel_idx], parts_hyb,
-            f"latent_mas_hybrid (same family)\n"
-            f"{os.path.basename(args.model_a)} → {os.path.basename(args.model_b_hybrid)}\n"
-            f"cos_sim = {cos_hybrid:.4f}",
-            colors, markers)
-        panel_idx += 1
+            axes[0, col], parts_hyb_v,
+            f"[Vocab] latent_mas_hybrid\n"
+            f"{os.path.basename(args.model_a)} → "
+            f"{os.path.basename(args.model_b_hybrid)}\n"
+            f"cos = {cos_hybrid_vocab:.4f}",
+            colors3, markers3)
+        col += 1
 
-    # --- Panel 3: latent_mas_plus ---
+    # --- Panel (0, 2): latent_mas_plus vocab ---
     if "latent_mas_plus" in methods_to_plot:
-        src_plus_projected = (torch.from_numpy(src_plus).float() @ W_plus).numpy()
-        src_norms = np.linalg.norm(src_plus_projected, axis=1, keepdims=True) + 1e-8
-        src_plus_projected = src_plus_projected * (tn_plus.item() / src_norms)
-
-        data_plus = {
-            f"Source (projected)": src_plus_projected,
-            f"Aligned (W_out_A @ W_intersect)": aligned_plus,
-            f"Target (W_in_B)": tgt_plus,
+        src_plus_proj = (torch.from_numpy(src_plus).float() @ W_plus).numpy()
+        src_norms = np.linalg.norm(src_plus_proj, axis=1, keepdims=True) + 1e-8
+        src_plus_proj = src_plus_proj * (tn_plus.item() / src_norms)
+        data_plus_v = {
+            "Source (projected)": src_plus_proj,
+            "Aligned (W_out_A @ W_inter)": aligned_plus,
+            "Target (W_in_B)": tgt_plus,
         }
-        parts_plus = run_tsne_and_plot(data_plus, args.perplexity, args.seed + 2,
-                                        args.output, "latent_mas_plus")
+        parts_plus_v = run_tsne(data_plus_v, args.perplexity, args.seed + 2)
         plot_single_method(
-            axes[panel_idx], parts_plus,
-            f"latent_mas_plus (different family)\n"
-            f"{os.path.basename(args.model_a)} → {os.path.basename(args.model_b_plus)}\n"
-            f"cos_sim = {cos_plus:.4f}",
-            colors, markers)
-        panel_idx += 1
+            axes[0, col], parts_plus_v,
+            f"[Vocab] latent_mas_plus\n"
+            f"{os.path.basename(args.model_a)} → "
+            f"{os.path.basename(args.model_b_plus)}\n"
+            f"cos = {cos_plus_vocab:.4f}",
+            colors3, markers3)
+        col += 1
 
-    plt.suptitle("t-SNE Visualization of Latent Alignment Quality", fontsize=16,
-                 fontweight="bold", y=1.02)
+    # ── Row 2: Inference-level alignment ────────────────────────────────
+    col = 0
+
+    # --- Panel (1, 0): latent_mas inference ---
+    # Self-alignment: all vectors in d_A space → 3 clusters directly
+    data_infer_self = {
+        "Hidden (h_t)": hidden_self_np,
+        "Aligned (h_t @ W_self)": aligned_infer_self,
+        "Target (W_in[pred_t])": tgt_infer_self,
+    }
+    parts_infer_self = run_tsne(data_infer_self, args.perplexity, args.seed + 10)
+    plot_single_method(
+        axes[1, col], parts_infer_self,
+        f"[Inference] latent_mas (same model)\n"
+        f"{os.path.basename(args.model_a)}\n"
+        f"cos = {cos_infer_self:.4f}",
+        colors3, markers3)
+    col += 1
+
+    # --- Panel (1, 1): latent_mas_hybrid inference ---
+    if "latent_mas_hybrid" in methods_to_plot:
+        if aligned_infer_hybrid is not None:
+            # Cross-model: aligned & target in d_B space → 2 clusters
+            data_infer_hyb = {
+                "Aligned (h_t @ W_cross)": aligned_infer_hybrid,
+                "Target (W_in_B[pred_t])": tgt_infer_hybrid,
+            }
+            parts_infer_hyb = run_tsne(
+                data_infer_hyb, args.perplexity, args.seed + 11)
+            plot_single_method(
+                axes[1, col], parts_infer_hyb,
+                f"[Inference] latent_mas_hybrid\n"
+                f"{os.path.basename(args.model_a)} → "
+                f"{os.path.basename(args.model_b_hybrid)}\n"
+                f"cos = {cos_infer_hybrid:.4f}",
+                colors2, markers2)
+        else:
+            axes[1, col].text(
+                0.5, 0.5, "No valid tokens", ha="center", va="center",
+                transform=axes[1, col].transAxes, fontsize=12)
+            axes[1, col].set_title(
+                "[Inference] latent_mas_hybrid\n(no data)", fontsize=11)
+        col += 1
+
+    # --- Panel (1, 2): latent_mas_plus inference ---
+    if "latent_mas_plus" in methods_to_plot:
+        if aligned_infer_plus is not None:
+            data_infer_plus = {
+                "Aligned (h_t @ W_inter)": aligned_infer_plus,
+                "Target (W_in_B[pred_t])": tgt_infer_plus,
+            }
+            parts_infer_plus = run_tsne(
+                data_infer_plus, args.perplexity, args.seed + 12)
+            plot_single_method(
+                axes[1, col], parts_infer_plus,
+                f"[Inference] latent_mas_plus\n"
+                f"{os.path.basename(args.model_a)} → "
+                f"{os.path.basename(args.model_b_plus)}\n"
+                f"cos = {cos_infer_plus:.4f}",
+                colors2, markers2)
+        else:
+            axes[1, col].text(
+                0.5, 0.5, "No mappable tokens", ha="center", va="center",
+                transform=axes[1, col].transAxes, fontsize=12)
+            axes[1, col].set_title(
+                "[Inference] latent_mas_plus\n(no data)", fontsize=11)
+        col += 1
+
+    plt.suptitle(
+        "t-SNE: Latent Alignment Quality\n"
+        "Row 1: Vocabulary-level  |  Row 2: Real Inference",
+        fontsize=15, fontweight="bold", y=1.02)
     plt.tight_layout()
 
     # ── Save ────────────────────────────────────────────────────────────
@@ -436,11 +660,17 @@ def main():
     # ── Summary ─────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
     print(f"  Alignment Quality Summary (cosine similarity)")
-    print(f"  {'latent_mas (self):':<35} {cos_self:.4f}")
-    if cos_hybrid is not None:
-        print(f"  {'latent_mas_hybrid (same family):':<35} {cos_hybrid:.4f}")
-    if cos_plus is not None:
-        print(f"  {'latent_mas_plus (diff family):':<35} {cos_plus:.4f}")
+    print(f"  {'':35s} {'Vocab':>8s} {'Infer':>8s}")
+    print(f"  {'-'*53}")
+    print(f"  {'latent_mas (self):':<35s} {cos_self:>8.4f} {cos_infer_self:>8.4f}")
+    if cos_hybrid_vocab is not None:
+        hyb_str = f"{cos_infer_hybrid:.4f}" if cos_infer_hybrid is not None else "  N/A "
+        print(f"  {'latent_mas_hybrid (same family):':<35s} "
+              f"{cos_hybrid_vocab:>8.4f} {hyb_str:>8s}")
+    if cos_plus_vocab is not None:
+        plus_str = f"{cos_infer_plus:.4f}" if cos_infer_plus is not None else "  N/A "
+        print(f"  {'latent_mas_plus (diff family):':<35s} "
+              f"{cos_plus_vocab:>8.4f} {plus_str:>8s}")
     print(f"{'='*60}")
 
 
