@@ -9,12 +9,12 @@ This script rigorously evaluates 3 alignment strategies:
 
 Usage
 -----
-    python scripts/tsne_alignment.py \
-        --model_a Qwen/Qwen3-1.7B \
-        --n_train 150 \
-        --n_test 30 \
-        --mid_layer_idx 12 \
-        --mlp_epochs 50 \
+    python scripts/tsne_alignment_nonlinear.py \
+        --model_a Qwen/Qwen3-4B \
+        --n_train 1000 \
+        --n_test 50 \
+        --mid_layer_idx 2 \
+        --mlp_epochs 100 \
         --perplexity 30 \
         --output figures/tsne_autoregressive_nonlinear.png
 """

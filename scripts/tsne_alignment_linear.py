@@ -10,7 +10,7 @@ vs "Activation Manifold Alignment" (Improved Middle-Layer Injection) with:
 
 Usage
 -----
-    python scripts/tsne_alignment.py \
+    python scripts/tsne_alignment_linear.py \
         --model_a Qwen/Qwen3-1.7B \
         --n_train 150 \
         --n_test 30 \
