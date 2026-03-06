@@ -18,9 +18,11 @@ from data import (
 )
 from methods.baseline import BaselineMethod
 from methods.latent_mas import LatentMASMethod
+from methods.latent_mas_dd import LatentMASDDMethod
 from methods.latent_mas_hybrid import LatentMASHybridMethod
 from methods.latent_mas_plus import LatentMASPlus
 from methods.text_mas import TextMASMethod
+from train_alignment import get_default_alignment_path, train_dd_alignment
 from models import ModelWrapper
 from utils import auto_device, set_seed
 import time
@@ -80,7 +82,7 @@ def process_batch(
     if remaining <= 0:
         return processed, preds
     current_batch = batch[:remaining]
-    if args.method in ["latent_mas", "latent_mas_hybrid", "latent_mas_plus"] and args.use_vllm: 
+    if args.method in ["latent_mas", "latent_mas_dd", "latent_mas_hybrid", "latent_mas_plus"] and args.use_vllm: 
         results = method.run_batch_vllm(current_batch) 
     else:
         results = method.run_batch(current_batch)
@@ -124,7 +126,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     # core args for experiments
-    parser.add_argument("--method", choices=["baseline", "text_mas", "latent_mas", "latent_mas_hybrid", "latent_mas_plus"], required=True)
+    parser.add_argument("--method", choices=["baseline", "text_mas", "latent_mas", "latent_mas_dd", "latent_mas_hybrid", "latent_mas_plus"], required=True)
     parser.add_argument("--model_name", type=str, required=True, #choices=["Qwen/Qwen3-4B", "Qwen/Qwen3-4B", "Qwen/Qwen3-14B"]
     )
     parser.add_argument("--max_samples", type=int, default=-1)
@@ -190,7 +192,7 @@ def main():
             args.custom_prompts = raw_text
             args.custom_prompt_text = raw_text
 
-    if args.method in ["latent_mas", "latent_mas_hybrid", "latent_mas_plus"] and args.use_vllm:
+    if args.method in ["latent_mas", "latent_mas_dd", "latent_mas_hybrid", "latent_mas_plus"] and args.use_vllm:
         args.use_second_HF_model = True 
         args.enable_prefix_caching = True
 
@@ -237,6 +239,25 @@ def main():
         method = LatentMASHybridMethod(
             model,
             agent_models=args.agent_models,
+            latent_steps=args.latent_steps,
+            judger_max_new_tokens=args.max_new_tokens,
+            **common_kwargs,
+            generate_bs=args.generate_bs,
+            args=args,
+        )
+    elif args.method == 'latent_mas_dd':
+        alignment_path = get_default_alignment_path(args.model_name)
+        if not os.path.exists(alignment_path):
+            print(f"[LatentMAS-DD] Alignment matrix not found at {alignment_path}. Training ...")
+            hf_model = model.HF_model if hasattr(model, 'HF_model') and model.HF_model is not None else model.model
+            train_dd_alignment(
+                hf_model, model.tokenizer, alignment_path,
+                device=str(next(hf_model.parameters()).device),
+                seed=args.seed,
+            )
+        method = LatentMASDDMethod(
+            model,
+            alignment_path=alignment_path,
             latent_steps=args.latent_steps,
             judger_max_new_tokens=args.max_new_tokens,
             **common_kwargs,

@@ -2,9 +2,9 @@
 Usage
 -----
     python scripts/tsne_alignment.py \
-        --model_a Qwen/Qwen3-1.7B \
+        --model_a Qwen/Qwen3-4B \
         --n_samples 30 \
-        --perplexity 30 \
+        --perplexity 50 \
         --seed 42 \
         --output figures/tsne_alignment.png
 """
@@ -295,7 +295,6 @@ def main():
     }
     parts_infer_self = run_tsne(data_infer_self, args.perplexity, args.seed + 10)
     
-    # 在图片标题中加入差距信息，更加直观
     plot_title = (f"[Inference] latent_mas (same model)\n"
                   f"{os.path.basename(args.model_a)}\n"
                   f"cos = {cos_infer_self:.4f} | Rel Gap = {infer_gap_self*100:.1f}%")
