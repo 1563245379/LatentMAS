@@ -3,7 +3,7 @@ set -euo pipefail
 export HF_HOME=/workspace/cache
 
 RUN_CMD="python run.py \
-  --method latent_mas_dd \
+  --method text_mas \
   --model_name Qwen/Qwen3-14B \
   --task medqa \
   --max_new_tokens 4096 \

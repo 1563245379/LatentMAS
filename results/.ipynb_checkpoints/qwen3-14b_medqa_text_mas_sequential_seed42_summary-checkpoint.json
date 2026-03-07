@@ -1,0 +1,12 @@
+{
+  "method": "text_mas",
+  "model": "Qwen/Qwen3-14B",
+  "split": "test",
+  "seed": 42,
+  "max_samples": 300,
+  "accuracy": 0.75,
+  "correct": 225,
+  "total_time_sec": 7002.8289,
+  "time_per_sample_sec": 23.3428,
+  "output_file": "results/qwen3-14b_medqa_text_mas_sequential_seed42.jsonl"
+}
