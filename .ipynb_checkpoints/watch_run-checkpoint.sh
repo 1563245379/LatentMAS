@@ -3,13 +3,14 @@ set -euo pipefail
 export HF_HOME=/workspace/cache
 
 RUN_CMD="python run.py \
-  --method latent_mas \
+  --method latent_mas_dd \
   --model_name Qwen/Qwen3-4B \
-  --task mbppplus \
+  --task gsm8k \
+  --max_new_tokens 4096 \
   --prompt sequential \
   --max_samples -1 \
-  --generate_bs 8 \
-  --latent_steps 40 \
+  --generate_bs 12 \
+  --latent_steps 20 \
   --think \
   --latent_space_realign \
   --resume"

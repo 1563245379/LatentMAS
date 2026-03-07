@@ -65,6 +65,7 @@ def train_dd_alignment(
     lambda_reg=1e-4,
     device="cuda",
     seed=42,
+    data_set="gsm8k",
 ):
     """Train and save a data-driven alignment matrix.
 
@@ -81,8 +82,10 @@ def train_dd_alignment(
 
     np.random.seed(seed)
     torch.manual_seed(seed)
-
-    ds = load_dataset("gsm8k", "main", split="train")
+    if isinstance(data_set, dict):
+        ds = load_dataset(**data_set, split="train")
+    else:
+        ds = load_dataset(data_set, split="train")
     rng = np.random.RandomState(seed)
     indices = rng.choice(len(ds), size=min(n_train, len(ds)), replace=False)
     questions = [ds[int(i)]["question"].strip() for i in indices]

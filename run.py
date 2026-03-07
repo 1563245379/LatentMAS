@@ -250,11 +250,38 @@ def main():
         if not os.path.exists(alignment_path):
             print(f"[LatentMAS-DD] Alignment matrix not found at {alignment_path}. Training ...")
             hf_model = model.HF_model if hasattr(model, 'HF_model') and model.HF_model is not None else model.model
+            
+            dataset_dir = {
+                "gsm8k": {
+                    "path": "gsm8k",
+                    "name": "main",
+                },
+                "aime2024": "HuggingFaceH4/aime_2024",
+                "aime2025": "yentinglin/aime_2025",
+                "gpqa": "fingertap/GPQA-Diamond",
+                "arc_easy": {
+                    "path": "allenai/ai2_arc",
+                    "name": "ARC-Easy",
+                },
+                "arc_challenge": {
+                    "path": "allenai/ai2_arc",
+                    "name": "ARC-Challenge",
+                },
+                "mbppplus": "evalplus/mbppplus",
+                'humanevalplus': 'evalplus/humanevalplus',
+                'medqa': {
+                    "path": "json",
+                    "data_files": "./data/medqa.json",
+                },
+            }
+            
             train_dd_alignment(
                 hf_model, model.tokenizer, alignment_path,
                 device=str(next(hf_model.parameters()).device),
                 seed=args.seed,
+                data_set=dataset_dir.get(args.task, {"path": "gsm8k", "name": "main"}),
             )
+
         method = LatentMASDDMethod(
             model,
             alignment_path=alignment_path,
