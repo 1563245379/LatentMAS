@@ -4,15 +4,16 @@ export HF_HOME=/workspace/cache
 
 RUN_CMD="python run.py \
   --method latent_mas_dd \
-  --model_name Qwen/Qwen3-4B \
+  --model_name Qwen/Qwen3-14B \
   --task medqa \
   --max_new_tokens 4096 \
   --prompt sequential \
   --max_samples -1 \
-  --generate_bs 16 \
-  --latent_steps 40 \
+  --generate_bs 8 \
+  --latent_steps 128 \
   --think \
   --latent_space_realign \
+  --custom_prompt_file prompts_config/prompts_advanced.json \
   --resume"
 
 LOG_FILE="output.log"

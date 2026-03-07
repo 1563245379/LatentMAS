@@ -242,7 +242,7 @@ Your response:
         else:
             if role == "planner":
                 user_content = f"""
-You are a math agent. Given the input question, reason step-by-step and put the final answer inside \\boxed{{YOUR_FINAL_ANSWER}}.
+You are a math agent. Given the input question, reason step-by-step and put the final answer inside \\boxed{{}}.
 Your final answer must be selected from A,B,C,D. For example \\boxed{{A}}. Do not add any other contents inside the box.
 
 Input Question: {question}
